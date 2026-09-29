@@ -444,6 +444,7 @@ impl Session {
             for t in dev.tasks {
                 t.abort();
             }
+            info!("client socket closed, disconnecting {}", dev.peripheral.id());
             self.manager.disconnect(&dev.peripheral).await;
         }
     }

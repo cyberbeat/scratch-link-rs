@@ -165,6 +165,18 @@ impl BleManager {
         let _ = peripheral.disconnect().await;
     }
 
+    /// Graceful shutdown: drop every live BLE link. BlueZ keeps connections
+    /// alive even when the requesting D-Bus client exits, so without this a
+    /// killed daemon would leave hubs connected until they time out.
+    pub async fn disconnect_all(&self) {
+        for p in self.peripherals().await {
+            if p.is_connected().await.unwrap_or(false) {
+                info!("shutdown: disconnecting {}", p.id());
+                let _ = p.disconnect().await;
+            }
+        }
+    }
+
     async fn reconcile_scan(&self) {
         let (desired, active) = {
             let inner = self.inner.lock().await;

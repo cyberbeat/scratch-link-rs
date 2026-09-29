@@ -37,16 +37,40 @@ async fn main() {
     info!("listening on ws://127.0.0.1:20111/scratch/ble");
 
     loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                let mgr = manager.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = ws::handle_connection(stream, mgr).await {
-                        warn!("connection {addr}: {e}");
+        tokio::select! {
+            accept = listener.accept() => {
+                match accept {
+                    Ok((stream, addr)) => {
+                        let mgr = manager.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = ws::handle_connection(stream, mgr).await {
+                                warn!("connection {addr}: {e}");
+                            }
+                        });
                     }
-                });
+                    Err(e) => error!("accept failed: {e}"),
+                }
             }
-            Err(e) => error!("accept failed: {e}"),
+            _ = shutdown_signal() => {
+                info!("shutting down, disconnecting peripherals");
+                manager.disconnect_all().await;
+                break;
+            }
         }
     }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = term.recv() => {},
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
