@@ -1,6 +1,7 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use btleplug::api::{CentralEvent, CharPropFlags, Peripheral as _, WriteType};
@@ -66,6 +67,9 @@ struct Device {
     peripheral: Peripheral,
     /// Tasks forwarding notifications / watching disconnect. Aborted on cleanup.
     tasks: Vec<JoinHandle<()>>,
+    /// Characteristics with active notify subscriptions (for re-subscribe
+    /// after a transparent reconnect).
+    subscribed: Arc<std::sync::Mutex<HashSet<(Uuid, Uuid)>>>,
 }
 
 /// A Web-BLE-style discovery filter entry: all given fields must match.
@@ -254,15 +258,31 @@ impl Session {
             }));
         }
 
-        // BLE disconnect -> close the WebSocket (same contract as the JS impl).
+        // BLE disconnect -> close the WebSocket (same contract as the JS impl),
+        // with one transparent reconnect for early drops: BlueZ sometimes
+        // bounces a fresh link ~1-2s after connect (stale ACL state).
         {
             let mut events = self.manager.subscribe_events();
             let id = peripheral.id();
             let tx = self.tx.clone();
+            let dev_periph = peripheral.clone();
+            let subscribed = Arc::new(std::sync::Mutex::new(HashSet::new()));
+            let connected_at = Instant::now();
+            let reconnect_tried = Arc::new(AtomicBool::new(false));
+            let watch_subscribed = subscribed.clone();
+            let watch_retried = reconnect_tried.clone();
             tasks.push(tokio::spawn(async move {
                 loop {
                     match events.recv().await {
                         Ok(CentralEvent::DeviceDisconnected(d)) if d == id => {
+                            let early = connected_at.elapsed() < Duration::from_secs(6);
+                            if early
+                                && !watch_retried.swap(true, Ordering::SeqCst)
+                                && reconnect(&dev_periph, &watch_subscribed).await.is_ok()
+                            {
+                                info!("peripheral {id}: transparent reconnect succeeded");
+                                continue;
+                            }
                             info!("peripheral {id} disconnected, closing session");
                             let _ = tx.send(Message::Close(None));
                             break;
@@ -273,9 +293,13 @@ impl Session {
                     }
                 }
             }));
+            self.device = Some(Device {
+                peripheral,
+                tasks,
+                subscribed,
+            });
         }
 
-        self.device = Some(Device { peripheral, tasks });
         info!("connected {token}");
         Ok(())
     }
@@ -324,6 +348,12 @@ impl Session {
         )?;
         if params.get("startNotifications").and_then(Value::as_bool) == Some(true) {
             peripheral.subscribe(&c).await?;
+            if let Some(dev) = &self.device {
+                dev.subscribed
+                    .lock()
+                    .unwrap()
+                    .insert((c.service_uuid, c.uuid));
+            }
         }
         let value = peripheral.read(&c).await?;
         Ok(Value::String(B64.encode(&value)))
@@ -366,6 +396,14 @@ impl Session {
             peripheral.subscribe(&c).await?;
         } else {
             peripheral.unsubscribe(&c).await?;
+        }
+        if let Some(dev) = &self.device {
+            let mut sub = dev.subscribed.lock().unwrap();
+            if enable {
+                sub.insert((c.service_uuid, c.uuid));
+            } else {
+                sub.remove(&(c.service_uuid, c.uuid));
+            }
         }
         Ok(())
     }
@@ -439,6 +477,31 @@ async fn announce_peripheral(
         }
     });
     let _ = tx.send(Message::Text(msg.to_string().into()));
+}
+
+/// Reconnect after an early link drop: fresh connect, re-run service
+/// discovery and re-subscribe all characteristics that had notifications on.
+async fn reconnect(
+    peripheral: &Peripheral,
+    subscribed: &std::sync::Mutex<HashSet<(Uuid, Uuid)>>,
+) -> anyhow::Result<()> {
+    peripheral
+        .connect_with_timeout(Duration::from_secs(10))
+        .await?;
+    peripheral.discover_services().await?;
+    let chars: Vec<(Uuid, Uuid)> = subscribed.lock().unwrap().iter().copied().collect();
+    for (service_uuid, char_uuid) in chars {
+        if let Some(c) = peripheral
+            .characteristics()
+            .iter()
+            .find(|c| c.service_uuid == service_uuid && c.uuid == char_uuid)
+        {
+            if let Err(e) = peripheral.subscribe(c).await {
+                warn!("re-subscribe {char_uuid} failed: {e}");
+            }
+        }
+    }
+    Ok(())
 }
 
 fn is_lagged(e: &tokio::sync::broadcast::error::RecvError) -> bool {

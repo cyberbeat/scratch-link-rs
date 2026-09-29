@@ -119,6 +119,8 @@ impl BleManager {
 
     /// Pause scanning while connecting (BlueZ quirk) and run connect +
     /// service discovery. Always resumes scanning afterwards.
+    /// Clears stale/zombie links first: a still-"connected" BlueZ entry makes
+    /// the next connect bounce ~2s after it appears to succeed.
     pub async fn connect(&self, token: &str, timeout: Duration) -> anyhow::Result<Peripheral> {
         let peripheral = self
             .peripheral_for_token(token)
@@ -128,6 +130,13 @@ impl BleManager {
         {
             self.inner.lock().await.connect_pause += 1;
             self.reconcile_scan().await;
+        }
+        // Let the adapter settle after discovery stops before connecting.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        if peripheral.is_connected().await.unwrap_or(false) {
+            debug!("{token}: clearing stale connection before connect");
+            let _ = peripheral.disconnect().await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
         }
         let result = async {
             info!("connect {token}");
@@ -175,8 +184,11 @@ impl BleManager {
         match result {
             Ok(()) => self.inner.lock().await.scanning = desired,
             Err(e) => {
-                // Keep `scanning` as-is; the next reconcile retries.
-                warn!("scan {} failed: {e}", if desired { "start" } else { "stop" });
+                // BlueZ stops discovery on its own when a connect happens, so
+                // our flag can desync. A failed stop means "not scanning" in
+                // practice — converge the flag to the desired state.
+                debug!("scan {} failed (converging flag): {e}", if desired { "start" } else { "stop" });
+                self.inner.lock().await.scanning = desired;
             }
         }
     }
