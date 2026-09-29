@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +17,10 @@ const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Serves one TCP connection: plain HTTP GET -> "200 OK" health check
 /// (same as the reference server), WebSocket upgrade -> BLE session.
-pub async fn handle_connection(mut stream: TcpStream, manager: Arc<BleManager>) -> anyhow::Result<()> {
+pub async fn handle_connection(
+    mut stream: TcpStream,
+    manager: Arc<BleManager>,
+) -> anyhow::Result<()> {
     // Read the HTTP request head byte-by-byte so we never consume bytes that
     // belong to the first WebSocket frame.
     let mut head = Vec::with_capacity(512);
@@ -60,7 +62,12 @@ pub async fn handle_connection(mut stream: TcpStream, manager: Arc<BleManager>) 
         )
         .await?;
 
-    let ws = WebSocketStream::from_raw_socket(stream, tokio_tungstenite::tungstenite::protocol::Role::Server, None).await;
+    let ws = WebSocketStream::from_raw_socket(
+        stream,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
     session::run(ws, manager).await
 }
 
@@ -84,5 +91,9 @@ fn websocket_key(head: &str) -> Option<String> {
             }
         }
     }
-    if upgrade { key } else { None }
+    if upgrade {
+        key
+    } else {
+        None
+    }
 }

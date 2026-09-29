@@ -3,6 +3,8 @@ name = "scratch-link-rs"
 version = "0.1.0"
 edition = "2021"
 description = "Scratch Link compatible BLE bridge (multiplatform, multi-device)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cyberbeat/scratch-link-rs"
 
 [dependencies]
 btleplug = "0.13"

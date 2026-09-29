@@ -88,7 +88,10 @@ impl FilterEntry {
             }
         }
         if let Some(prefix) = &self.name_prefix {
-            if !name.map(|n| n.starts_with(prefix.as_str())).unwrap_or(false) {
+            if !name
+                .map(|n| n.starts_with(prefix.as_str()))
+                .unwrap_or(false)
+            {
                 return false;
             }
         }
@@ -110,7 +113,9 @@ impl Filters {
         if self.0.is_empty() {
             return true; // no filters given -> announce everything
         }
-        self.0.iter().any(|f| !f.is_empty() && f.matches(name, advertised))
+        self.0
+            .iter()
+            .any(|f| !f.is_empty() && f.matches(name, advertised))
             || self.0.iter().all(|f| f.is_empty())
     }
 }
@@ -182,7 +187,14 @@ impl Session {
 
     async fn handle_discover(&mut self, params: &Value) -> anyhow::Result<()> {
         let filters = parse_filters(params);
-        debug!("discover filters={:?}", filters.0.iter().map(|f| f.services.len()).collect::<Vec<_>>());
+        debug!(
+            "discover filters={:?}",
+            filters
+                .0
+                .iter()
+                .map(|f| f.services.len())
+                .collect::<Vec<_>>()
+        );
 
         if self.discover_task.is_none() {
             self.manager.start_discovery().await;
@@ -335,7 +347,9 @@ impl Session {
             .into_iter()
             .find(|c| c.service_uuid == service && c.uuid == characteristic)
             .ok_or_else(|| {
-                anyhow::anyhow!("characteristic {characteristic_id} on service {service_id} not found")
+                anyhow::anyhow!(
+                    "characteristic {characteristic_id} on service {service_id} not found"
+                )
             })
     }
 
@@ -444,7 +458,10 @@ impl Session {
             for t in dev.tasks {
                 t.abort();
             }
-            info!("client socket closed, disconnecting {}", dev.peripheral.id());
+            info!(
+                "client socket closed, disconnecting {}",
+                dev.peripheral.id()
+            );
             self.manager.disconnect(&dev.peripheral).await;
         }
     }
@@ -558,7 +575,8 @@ fn decode_message(params: &Value) -> anyhow::Result<Vec<u8>> {
     match msg {
         Value::String(s) => {
             if params.get("encoding").and_then(Value::as_str) == Some("base64") {
-                B64.decode(s).map_err(|e| anyhow::anyhow!("bad base64: {e}"))
+                B64.decode(s)
+                    .map_err(|e| anyhow::anyhow!("bad base64: {e}"))
             } else {
                 Ok(s.clone().into_bytes())
             }

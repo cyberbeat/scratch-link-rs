@@ -44,3 +44,8 @@ Logging via `RUST_LOG`, default `scratch_link_rs=info`.
 
 UUID params accept 128-bit strings or 16/32-bit shorthand (expanded to the
 Bluetooth base UUID).
+
+## License
+
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE),
+at your option.

@@ -199,7 +199,10 @@ impl BleManager {
                 // BlueZ stops discovery on its own when a connect happens, so
                 // our flag can desync. A failed stop means "not scanning" in
                 // practice — converge the flag to the desired state.
-                debug!("scan {} failed (converging flag): {e}", if desired { "start" } else { "stop" });
+                debug!(
+                    "scan {} failed (converging flag): {e}",
+                    if desired { "start" } else { "stop" }
+                );
                 self.inner.lock().await.scanning = desired;
             }
         }
